@@ -577,7 +577,8 @@ func syncBombs(bombs []Bomb, board [][]int, items []Item) {
 	for d := 1; d <= 9; d++ {
 		s := SetPos{}
 		for i := range bombs {
-			if bombs[i].CountDown == d {
+			p := bombs[i].Pos
+			if bombs[i].CountDown == d && board[p.Y][p.X] >= 100 {
 				explode2(bombs, board, bombs[i].Pos, s)
 			}
 		}
@@ -697,7 +698,7 @@ func (r game) round() bool {
 
 	if !found && me.Bombs > 0 {
 		debug("I have a bomb, box here?")
-		ok, safe := me.canDropBomb(origin)
+		ok, safe := me.canDropBomb(origin, bombs)
 		if ok {
 			debug("Yes")
 			dropBomb = true
@@ -713,7 +714,7 @@ func (r game) round() bool {
 			if pos == origin {
 				return false
 			}
-			ok, _ := me.canDropBomb(pos)
+			ok, _ := me.canDropBomb(pos, bombs)
 			if ok {
 				debug("found place to put a bomb, %v,%d", pos, d)
 				posToGo = pos
@@ -758,7 +759,7 @@ func (r game) round() bool {
 	posToGo = origin.safePathTo(posToGo, bombs)
 	if !dropBomb && me.Bombs > 0 {
 		debug("however, I  have a bomb")
-		ok, _ := me.canDropBomb(origin)
+		ok, _ := me.canDropBomb(origin, bombs)
 		if ok {
 			debug("with bomb drop, need to check if I can escape")
 			if posToGo.Z == 0 {
@@ -864,7 +865,7 @@ func (p Player) dropBomb(bombs []Bomb) []Bomb {
 
 // 놓을 수 있나? 놓아서 터질 박스는 있나? 죽지않고 피할 장소는?
 // 이미 놓여있는 bomb 들도 피해야 한다.
-func (p Player) canDropBomb(pos Pos3) (canDrop bool, safePlace Pos3) {
+func (p Player) canDropBomb(pos Pos3, bombs []Bomb) (canDrop bool, safePlace Pos3) {
 	b := Bomb{
 		Pos:       pos.Pos(),
 		Owner:     p.ID,
@@ -872,8 +873,8 @@ func (p Player) canDropBomb(pos Pos3) (canDrop bool, safePlace Pos3) {
 		CountDown: 8 + 1,
 	}
 
-	var bombs2 []Bomb
-	bombs2 = append(bombs2, bombs...)
+	bombs2 := make([]Bomb, len(bombs))
+	copy(bombs2, bombs)
 	bombs2 = append(bombs2, b)
 	syncBombs(bombs2, board, items)
 
