@@ -28,8 +28,11 @@ var bombs []Bomb
 var me Player
 
 const (
-	Floor = '.'
-	Wall  = 'X'
+	cellFloor    = '.'
+	cellWall     = 'X'
+	cellBoxEmpty = '0'
+	cellBoxRange = '1'
+	cellBoxPlus  = '2'
 	// BOX = 0, 1, 2
 )
 
@@ -40,9 +43,17 @@ const (
 	EntityItem   = 2
 )
 
+// Pos ...
 type Pos struct {
 	X int
 	Y int
+}
+
+// Pos3
+type Pos3 struct {
+	X int
+	Y int
+	Z int
 }
 
 func (p Pos) adjacent(o Pos) bool {
@@ -54,35 +65,37 @@ func (p Pos) adjacent(o Pos) bool {
 		return false
 	}
 }
-func (src Pos) safePathTo(dest Pos, bombs []Bomb) Pos {
-	if src == dest {
+
+func (p Pos) safePathTo(dest Pos, bombs []Bomb) Pos {
+	if p == dest {
 		return dest
 	}
 
 	debug("want to go %v", dest)
 
-	back := make([][]Pos, height)
-	for h := 0; h < height; h++ {
-		back[h] = make([]Pos, width)
-	}
+	back := map[Pos3]Pos3{}
 
-	bfs(src, 0, bombs, func(x, y, d, x0, y0 int) bool {
-		pos := Pos{x, y}
-		if pos != src {
-			back[y][x] = Pos{x0, y0}
+	var next Pos3
+	p3 := Pos3{p.X, p.Y, 0}
+	// debug("bfs start")
+	bfs(p, 0, bombs, func(x, y, d, x0, y0 int) bool {
+		// debug("bfs: %d,%d,%d,%d,%d", x, y, d, x0, y0)
+		if d == 0 {
+			return false
 		}
-		if pos == dest {
+		back[Pos3{x, y, d}] = Pos3{x0, y0, d - 1}
+		if x == dest.X && y == dest.Y {
+			next = Pos3{x, y, d}
 			return true
 		}
 		return false
 	})
 
 	// backtrack
-	next := dest
-	for src != back[next.Y][next.X] {
-		next = back[next.Y][next.X]
+	for back[next] != p3 {
+		next = back[next]
 	}
-	return next
+	return Pos{next.X, next.Y}
 }
 
 func (p Pos) down(i int) Pos {
@@ -105,34 +118,37 @@ func (p Pos) right(i int) Pos {
 	return p
 }
 
+// Player ...
 type Player struct {
-	Pos
+	Pos   Pos
 	ID    int
 	Bombs int
 	Range int
 }
 
+// Bomb ...
 type Bomb struct {
-	Pos
+	Pos       Pos
 	Owner     int
 	CountDown int
 	Range     int
 }
 
 const (
-	ItemNothing    = 0
-	ItemExtraRange = 1
-	ItemExtraBomb  = 2
+	itemNothing    = 0
+	itemExtraRange = 1
+	itemExtraBomb  = 2
 )
 
+// Item ...
 type Item struct {
-	Pos
+	Pos  Pos
 	Type int
 }
 
 func canGo(x, y, d int, bombs []Bomb) bool {
 	p := Pos{x, y}
-	if x >= 0 && y >= 0 && x < width && y < height && board[y][x] == Floor {
+	if x >= 0 && y >= 0 && x < width && y < height && board[y][x] == cellFloor {
 		for _, b := range bombs {
 			if b.Pos == p {
 				return false
@@ -146,61 +162,146 @@ func canGo(x, y, d int, bombs []Bomb) bool {
 	return false
 }
 
-func bfs(pos Pos, d0 int, bombs []Bomb, visit func(x, y, d, x0, y0 int) bool) {
-	INF := width + height + 1
+// SetPos is a set of Pos
+type SetPos map[Pos]struct{}
 
-	dist := make([][]int, height)
-	for h := 0; h < height; h++ {
-		dist[h] = make([]int, width)
-		for w := 0; w < width; w++ {
-			dist[h][w] = INF
-		}
+func (set SetPos) add(p Pos) {
+	set[p] = struct{}{}
+}
+
+func (set SetPos) has(p Pos) bool {
+	_, ok := set[p]
+	return ok
+}
+
+func (set SetPos) toSlice() []Pos {
+	slice := make([]Pos, 0, len(set))
+	for k := range set {
+		slice = append(slice, k)
 	}
+	sort.Slice(slice, func(i, j int) bool {
+		if slice[i].X == slice[j].X {
+			return slice[i].Y < slice[j].Y
+		} else {
+			return slice[i].X < slice[j].X
+		}
+	})
+	return slice
+}
+
+// bfs 는 시간 축(d)을 고려하고,
+// d는 항상 증가하기 때문에,
+// 어차피 방문한 곳을 또 방문할 일이 없다.
+// 즉, 현 상태의 bombs를 보고
+// 안전한 경로로 bfs를 진행해보자.
+func bfs(pos Pos, d0 int, bombs []Bomb, visit func(x, y, d, x0, y0 int) bool) {
 	layer := []Pos{pos}
 	d := d0
-	dist[pos.Y][pos.X] = d
 	if visit(pos.X, pos.Y, d, pos.X, pos.Y) {
 		return
 	}
-	for len(layer) > 0 {
+	for len(layer) > 0 && d < d0+9 {
 		d++
-		var newLayer []Pos
+		var newLayer = SetPos{}
 		for _, p := range layer {
+			// 가만히 있는다
+			if canGo(p.X, p.Y, d, bombs) {
+				newLayer.add(p)
+				if visit(p.X, p.Y, d, p.X, p.Y) {
+					return
+				}
+			}
 
-			// visit neighbor unvisited
-			if canGo(p.X, p.Y-1, d, bombs) && dist[p.Y-1][p.X] == INF {
-				dist[p.Y-1][p.X] = d
-				newLayer = append(newLayer, Pos{p.X, p.Y - 1})
+			if canGo(p.X, p.Y-1, d, bombs) {
+				newLayer.add(Pos{p.X, p.Y - 1})
 				if visit(p.X, p.Y-1, d, p.X, p.Y) {
 					return
 				}
 			}
-			if canGo(p.X-1, p.Y, d, bombs) && dist[p.Y][p.X-1] == INF {
-				dist[p.Y][p.X-1] = d
-				newLayer = append(newLayer, Pos{p.X - 1, p.Y})
+
+			if canGo(p.X-1, p.Y, d, bombs) {
+				newLayer.add(Pos{p.X - 1, p.Y})
 				if visit(p.X-1, p.Y, d, p.X, p.Y) {
 					return
 				}
 			}
-			if canGo(p.X, p.Y+1, d, bombs) && dist[p.Y+1][p.X] == INF {
-				dist[p.Y+1][p.X] = d
-				newLayer = append(newLayer, Pos{p.X, p.Y + 1})
+
+			if canGo(p.X, p.Y+1, d, bombs) {
+				newLayer.add(Pos{p.X, p.Y + 1})
 				if visit(p.X, p.Y+1, d, p.X, p.Y) {
 					return
 				}
 			}
-			if canGo(p.X+1, p.Y, d, bombs) && dist[p.Y][p.X+1] == INF {
-				dist[p.Y][p.X+1] = d
-				newLayer = append(newLayer, Pos{p.X + 1, p.Y})
+
+			if canGo(p.X+1, p.Y, d, bombs) {
+				newLayer.add(Pos{p.X + 1, p.Y})
 				if visit(p.X+1, p.Y, d, p.X, p.Y) {
 					return
 				}
 			}
 
 		}
-		layer = newLayer
+		layer = newLayer.toSlice()
 	}
 }
+
+// // World ...
+// type World struct {
+// 	board [][]int
+// 	bombs []Bomb
+// 	items []Item
+// 	d     int
+// }
+
+// func (w World) bfs(pos Pos, visit func(w World) bool) {
+// 	layer := []Pos{pos}
+// 	if visit(w) {
+// 		return
+// 	}
+// 	for len(layer) > 0 && d < d0+9 {
+// 		d++
+// 		var newLayer = SetPos{}
+// 		for _, p := range layer {
+// 			// 가만히 있는다
+// 			if canGo(p.X, p.Y, d, bombs) {
+// 				newLayer.add(p)
+// 				if visit(p.X, p.Y, d, p.X, p.Y) {
+// 					return
+// 				}
+// 			}
+
+// 			if canGo(p.X, p.Y-1, d, bombs) {
+// 				newLayer.add(Pos{p.X, p.Y - 1})
+// 				if visit(p.X, p.Y-1, d, p.X, p.Y) {
+// 					return
+// 				}
+// 			}
+
+// 			if canGo(p.X-1, p.Y, d, bombs) {
+// 				newLayer.add(Pos{p.X - 1, p.Y})
+// 				if visit(p.X-1, p.Y, d, p.X, p.Y) {
+// 					return
+// 				}
+// 			}
+
+// 			if canGo(p.X, p.Y+1, d, bombs) {
+// 				newLayer.add(Pos{p.X, p.Y + 1})
+// 				if visit(p.X, p.Y+1, d, p.X, p.Y) {
+// 					return
+// 				}
+// 			}
+
+// 			if canGo(p.X+1, p.Y, d, bombs) {
+// 				newLayer.add(Pos{p.X + 1, p.Y})
+// 				if visit(p.X+1, p.Y, d, p.X, p.Y) {
+// 					return
+// 				}
+// 			}
+
+// 		}
+// 		layer = newLayer.toSlice()
+// 	}
+// }
 
 func debugB(b [][]int) {
 	var line []string
@@ -217,7 +318,7 @@ func debugB(b [][]int) {
 
 func debugM(m map[int][]Pos) {
 	max := 0
-	for k, _ := range m {
+	for k := range m {
 		if k > max {
 			max = k
 		}
@@ -241,24 +342,34 @@ func isValid(p Pos) bool {
 }
 
 func isBox(p Pos) bool {
-	return board[p.Y][p.X] != Floor && board[p.Y][p.X] != Wall
+	return board[p.Y][p.X] != cellFloor && board[p.Y][p.X] != cellWall
 }
 
+// Box ...
 type Box struct {
-	Pos
-	Type int
+	Pos  Pos
+	Type rune
 }
 
 func getBox(p Pos) Box {
-	return Box{p, board[p.Y][p.X]}
+	return Box{p, rune(board[p.Y][p.X])}
 }
 
 func isWall(p Pos) bool {
-	return board[p.Y][p.X] == Wall
+	return board[p.Y][p.X] == cellWall
 }
 
 func isItem(p Pos) bool {
 	for _, e := range items {
+		if e.Pos == p {
+			return true
+		}
+	}
+	return false
+}
+
+func isBomb(p Pos) bool {
+	for _, e := range bombs {
 		if e.Pos == p {
 			return true
 		}
@@ -276,7 +387,7 @@ func getItem(p Pos) Item {
 }
 
 func clear(p Pos) {
-	board[p.Y][p.X] = Floor
+	board[p.Y][p.X] = cellFloor
 }
 
 // 이걸 언제 놓느냐에 따라서도 결과는 달라진다.
@@ -299,6 +410,9 @@ func explode(pos Pos, r int, destroy bool) []interface{} {
 				clear(p)
 			}
 			destroyed = append(destroyed, getBox(p))
+			return true
+		}
+		if isBomb(p) {
 			return true
 		}
 		if isItem(p) {
@@ -343,53 +457,129 @@ func explode(pos Pos, r int, destroy bool) []interface{} {
 	return destroyed
 }
 
-func syncBombs(bombs []Bomb) {
-	stack := []int{}
-	size := 0
+// Stack of int
+type StackInt struct {
+	values []int
+}
 
-	push := func(n int) {
-		stack = append(stack, n)
-		size++
+func (s *StackInt) push(n int) {
+	s.values = append(s.values, n)
+}
+
+func (s *StackInt) pop() int {
+	sz := len(s.values)
+	v := s.values[sz-1]
+	s.values = s.values[:sz-1]
+	return v
+}
+
+func (s *StackInt) isEmpty() bool {
+	return len(s.values) == 0
+}
+
+func copy1D(r []int) []int {
+	result := make([]int, len(r))
+	copy(result, r)
+	return result
+}
+
+func copy2D(m [][]int) [][]int {
+	result := make([][]int, len(m))
+	for i, row := range m {
+		result[i] = copy1D(row)
 	}
-	pop := func() int {
-		size--
-		value := stack[size]
-		stack = stack[0:size]
-		return value
+	return result
+}
+
+func inRange(n, lo, hi int) bool {
+	return n >= lo && n < hi
+}
+
+func inRange2D(x, y, w, h int) bool {
+	return inRange(x, 0, w) && inRange(y, 0, h)
+}
+
+func explode2(bombs []Bomb, board [][]int, p Pos, s SetPos) {
+	if s.has(p) {
+		return
 	}
-	empty := func() bool {
-		return size == 0
+	s.add(p)
+
+	x, y := p.X, p.Y
+	if board[y][x] < 100 { // not a bomb
+		return
 	}
+	r := bombs[board[y][x]-100].Range
+	dxs := []int{1, 0, -1, 0}
+	dys := []int{0, 1, 0, -1}
+
+	for d := 0; d < 4; d++ {
+		dx := dxs[d]
+		dy := dys[d]
+		x, y = p.X, p.Y
+		for i := 1; i < r; i++ {
+			x += dx
+			y += dy
+			if !inRange2D(x, y, width, height) {
+				break
+			}
+			if board[y][x] == cellFloor {
+				continue
+			} else if board[y][x] == cellWall {
+				break
+			} else {
+				explode2(bombs, board, Pos{x, y}, s)
+				break
+			}
+		}
+	}
+}
+
+// syncBombs 는 폭탄의 연쇄폭발로 같이 터지는 폭탄들의
+// countdown 값을 일치시켜놓는다.
+func syncBombs(bombs []Bomb, board [][]int, items []Item) {
 	if len(bombs) < 2 {
 		return
 	}
-	sort.Slice(bombs, func(i, j int) bool {
-		return bombs[i].CountDown < bombs[j].CountDown
-	})
-
-	for i := len(bombs) - 1; i >= 0; i-- {
-		push(i)
+	// boards와 items는 실제로 터뜨릴 거다. 그래서 복사해둔다.
+	board = copy2D(board)
+	// items도 board에 미리 놔둔다. 이건 그냥 보통 박스(0)라고 볼 수 있다.
+	for _, item := range items {
+		board[item.Pos.Y][item.Pos.X] = cellBoxEmpty
 	}
-	did := map[int]struct{}{}
-	for !empty() {
-		i := pop()
-		if _, ok := did[i]; ok {
-			continue
-		}
-		// explode
-		did[i] = struct{}{}
+	// 폭탄도 미리 놔두자. 이건 100 + index 로..
+	for i, b := range bombs {
+		board[b.Pos.Y][b.Pos.X] = 100 + i
+	}
+	// itemBox(1,2) 는 터뜨려도 또 item이 남는다.
 
-		for j := 0; j < len(bombs); j++ {
-			if _, ok := did[j]; ok {
-				continue
-			}
-			if bombs[i].inRange(bombs[j].Pos) {
-				bombs[j].CountDown = bombs[i].CountDown
-				push(j)
+	for d := 1; d <= 9; d++ {
+		s := SetPos{}
+		for i := range bombs {
+			if bombs[i].CountDown == d {
+				explode2(bombs, board, bombs[i].Pos, s)
 			}
 		}
-	}
 
+		// 터진 것들을 반영한다.
+		for _, p := range s.toSlice() {
+			// debug("%d: %v", d, p)
+			x, y := p.X, p.Y
+			switch board[y][x] {
+			case cellBoxPlus, cellBoxRange:
+				board[y][x] = cellBoxEmpty
+			case cellBoxEmpty:
+				board[y][x] = cellFloor
+			default:
+				// sync 맞춘다.
+				bombs[board[y][x]-100].CountDown = d
+				board[y][x] = cellFloor
+			}
+		}
+	}
+	// for i, b := range bombs {
+	// 	debug("bombs[%d] = %v", i, b)
+	// }
 }
 
 func (r game) move(bomb bool, pos Pos) {
@@ -405,7 +595,7 @@ func (r game) init() {
 	fmt.Fscan(r, &width, &height, &myID)
 }
 
-func (r game) round() {
+func (r game) round() bool {
 
 	// read status
 	board = make([][]int, height)
@@ -415,6 +605,10 @@ func (r game) round() {
 		var row string
 		fmt.Fscan(r, &row)
 		debug(row)
+		if len(row) != width {
+			debug("wrong input. exit.")
+			return false
+		}
 
 		for w := 0; w < width; w++ {
 			board[i][w] = int(row[w])
@@ -423,6 +617,7 @@ func (r game) round() {
 
 	var n int
 	fmt.Fscan(r, &n)
+	debug("%d", n)
 
 	players = nil
 	bombs = nil
@@ -448,7 +643,7 @@ func (r game) round() {
 	}
 
 	// bombs sync
-	syncBombs(bombs)
+	syncBombs(bombs, board, items)
 
 	// 우선 주변을 둘러보자.
 	// 갈수 있는곳..
@@ -498,7 +693,7 @@ func (r game) round() {
 			}
 			ok, _ := me.canDropBomb(pos, d)
 			if ok {
-				debug("found place to put a bomb")
+				debug("found place to put a bomb, %v,%d", pos, d)
 				if !me.canEscapeFrom(pos, d, bombs) {
 					debug("but, can't escape from there")
 					return false
@@ -591,6 +786,7 @@ func (r game) round() {
 	//   피할 수 있는 곳이 bomb countdown 거리 내에 있나? 그럼 피하자
 	// range 바
 
+	return true
 }
 
 // d0 시간뒤에 pos 에서 탈출할 수 있을까?
@@ -624,7 +820,7 @@ func (p Player) dropBomb(bombs []Bomb) []Bomb {
 	var bombs2 []Bomb
 	bombs2 = append(bombs2, bombs...)
 	bombs2 = append(bombs2, b)
-	syncBombs(bombs2)
+	syncBombs(bombs2, board, items)
 	return bombs2
 }
 
@@ -641,7 +837,7 @@ func (p Player) canDropBomb(pos Pos, d0 int) (canDrop bool, safePlace Pos) {
 	var bombs2 []Bomb
 	bombs2 = append(bombs2, bombs...)
 	bombs2 = append(bombs2, b)
-	syncBombs(bombs2)
+	syncBombs(bombs2, board, items)
 
 	destroyed := explode(b.Pos, b.Range, false)
 	var destroyedBoxes []Box
@@ -710,12 +906,19 @@ type game struct {
 }
 
 func main() {
-	var r io.Reader = os.Stdin
+	var r io.Reader
+	if len(os.Args) > 1 {
+		r, _ = os.Open(os.Args[1])
+	} else {
+		r = os.Stdin
+	}
 
 	g := game{r, os.Stdout}
-
 	g.init()
 	for {
-		g.round()
+		on := g.round()
+		if !on {
+			break
+		}
 	}
 }
