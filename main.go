@@ -775,6 +775,26 @@ func (r game) round() bool {
 		}
 	}
 
+	// 마지막으로 지금 상대방들이 폭탄을 뒀는데도
+	// 목적지로 가서 살수 있을까?
+	// 살수 없다면 거기로 가지말자.
+	for _, p := range players {
+		if p.ID == myID {
+			continue
+		}
+		bombs = p.dropBomb(bombs)
+	}
+	if _, ok := me.canEscapeFrom(posToGo, bombs); !ok {
+		debug("if others put bombs, I may die from %v", posToGo)
+		path, ok := me.canEscapeFrom(origin, bombs)
+		if !ok {
+			debug("i will die!")
+		} else {
+			debug("wow, i can escape!")
+			posToGo = path[0]
+		}
+	}
+
 	r.move(dropBomb, posToGo.Pos())
 
 	// 	// 이때 도망가는 중에도 폭탄을 떨어뜨릴지 고민해보자
