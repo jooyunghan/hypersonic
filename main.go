@@ -75,36 +75,24 @@ func (p Pos) adjacent(o Pos) bool {
 	}
 }
 
-func (p Pos) safePathTo(dest Pos, bombs []Bomb) Pos {
+func (p Pos3) safePathTo(dest Pos3, bombs []Bomb) Pos3 {
 	if p == dest {
 		return dest
 	}
 
 	debug("want to go %v", dest)
 
-	back := map[Pos3]Pos3{}
-
-	var next Pos3
-	p3 := Pos3{p.X, p.Y, 0}
 	// debug("bfs start")
-	bfs(p, 0, bombs, func(x, y, d, x0, y0 int) bool {
+	path, _ := bfs(p, bombs, func(x, y, d, x0, y0 int) bool {
+		pos := Pos3{x, y, d}
 		// debug("bfs: %d,%d,%d,%d,%d", x, y, d, x0, y0)
-		if d == 0 {
-			return false
-		}
-		back[Pos3{x, y, d}] = Pos3{x0, y0, d - 1}
-		if x == dest.X && y == dest.Y {
-			next = Pos3{x, y, d}
+		if pos == dest {
 			return true
 		}
 		return false
 	})
 
-	// backtrack
-	for back[next] != p3 {
-		next = back[next]
-	}
-	return Pos{next.X, next.Y}
+	return path[0]
 }
 
 func (p Pos) down(i int) Pos {
@@ -218,12 +206,10 @@ func (set SetPos3) toSlice() []Pos3 {
 		if slice[i].X == slice[j].X {
 			if slice[i].Y == slice[j].Y {
 				return slice[i].Z < slice[j].Z
-			} else {
-				return slice[i].Y < slice[j].Y
 			}
-		} else {
-			return slice[i].X < slice[j].X
+			return slice[i].Y < slice[j].Y
 		}
+		return slice[i].X < slice[j].X
 	})
 	return slice
 }
@@ -233,23 +219,25 @@ func (set SetPos3) toSlice() []Pos3 {
 // 어차피 방문한 곳을 또 방문할 일이 없다.
 // 즉, 현 상태의 bombs를 보고
 // 안전한 경로로 bfs를 진행해보자.
-func bfs(pos Pos, d0 int, bombs []Bomb, visit func(x, y, d, x0, y0 int) bool) ([]Pos, bool) {
-	var path []Pos
+func bfs(pos Pos3, bombs []Bomb, visit func(x, y, d, x0, y0 int) bool) ([]Pos3, bool) {
 	back := map[Pos3]Pos3{}
-	origin := Pos3{pos.X, pos.Y, d0}
-	getPath := func(next Pos3) []Pos {
-		path = append(path, next.Pos())
-		for origin != back[next] {
+	getPath := func(next Pos3) []Pos3 {
+		sz := next.Z - pos.Z
+		path := make([]Pos3, sz)
+		sz--
+		path[sz] = next
+		for pos != back[next] {
 			next = back[next]
-			path = append(path, next.Pos())
+			sz--
+			path[sz] = next
 		}
 		// debug("%v", path)
 		return path
 	}
 
-	layer := []Pos3{pos.at(d0)}
-	if visit(pos.X, pos.Y, d0, pos.X, pos.Y) {
-		return path, true
+	layer := []Pos3{pos}
+	if visit(pos.X, pos.Y, pos.Z, pos.X, pos.Y) {
+		return nil, true
 	}
 
 	dxs := []int{0, 0, 1, 0, -1}
@@ -275,7 +263,7 @@ func bfs(pos Pos, d0 int, bombs []Bomb, visit func(x, y, d, x0, y0 int) bool) ([
 		layer = newLayer.toSlice()
 	}
 
-	return path, false
+	return nil, false
 }
 
 // // World ...
@@ -683,17 +671,18 @@ func (r game) round() bool {
 	// 뭐가 있을까? 적? 아이템? 박스? 폭탄?
 
 	dropBomb := false
-	posToGo := me.Pos
+	posToGo := me.Pos.at(0)
+	origin := me.Pos.at(0)
 	found := false
 
 	debug("item?")
-	bfs(me.Pos, 0, bombs, func(x, y, d, x0, y0 int) bool {
-		pos := Pos{x, y}
+	bfs(origin, bombs, func(x, y, d, x0, y0 int) bool {
+		pos := Pos3{x, y, d}
 		for _, e := range items {
-			if e.Pos == pos {
-				debug("found an item, go get it")
-				// 하지마 여기가 괜찮을까?
-				if !me.canEscapeFrom(pos, d, bombs) {
+			if e.Pos == pos.Pos() {
+				debug("found an item %d,%d,%d", x, y, d)
+				// 하지만 먹고나서 괜찮을까?
+				if _, ok := me.canEscapeFrom(pos, bombs); !ok {
 					debug("but, can't escape from there")
 					return false
 				}
@@ -708,7 +697,7 @@ func (r game) round() bool {
 
 	if !found && me.Bombs > 0 {
 		debug("I have a bomb, box here?")
-		ok, safe := me.canDropBomb(me.Pos, 0)
+		ok, safe := me.canDropBomb(origin)
 		if ok {
 			debug("Yes")
 			dropBomb = true
@@ -719,12 +708,12 @@ func (r game) round() bool {
 
 	if !found {
 		debug("box (not here)?")
-		bfs(me.Pos, 0, bombs, func(x, y, d, x0, y0 int) bool {
-			pos := Pos{x, y}
-			if pos == me.Pos {
+		bfs(origin, bombs, func(x, y, d, x0, y0 int) bool {
+			pos := Pos3{x, y, d}
+			if pos == origin {
 				return false
 			}
-			ok, _ := me.canDropBomb(pos, d)
+			ok, _ := me.canDropBomb(pos)
 			if ok {
 				debug("found place to put a bomb, %v,%d", pos, d)
 				posToGo = pos
@@ -746,7 +735,7 @@ func (r game) round() bool {
 
 		if len(bombsInDanger) > 0 {
 			debug("need to escape from bombs")
-			bfs(me.Pos, 0, bombs, func(x, y, d, x0, y0 int) bool {
+			bfs(origin, bombs, func(x, y, d, x0, y0 int) bool {
 				safe := true
 				for _, b := range bombs {
 					if b.inRange(Pos{x, y}) {
@@ -756,7 +745,7 @@ func (r game) round() bool {
 				}
 				if safe {
 					found = true
-					posToGo = Pos{x, y}
+					posToGo = Pos3{x, y, d}
 					return true
 				}
 				return false
@@ -766,13 +755,16 @@ func (r game) round() bool {
 
 	// game engine just get shorted path
 	// but it can be dangerous
-	posToGo = me.Pos.safePathTo(posToGo, bombs)
+	posToGo = origin.safePathTo(posToGo, bombs)
 	if !dropBomb && me.Bombs > 0 {
 		debug("however, I  have a bomb")
-		ok, _ := me.canDropBomb(me.Pos, 0)
+		ok, _ := me.canDropBomb(origin)
 		if ok {
 			debug("with bomb drop, need to check if I can escape")
-			if posToGo == me.Pos || me.canEscapeFrom(posToGo, 1, me.dropBomb(bombs)) {
+			if posToGo.Z == 0 {
+				debug("yes can escape from %v, (already figured out)", posToGo)
+				dropBomb = true
+			} else if _, ok := me.canEscapeFrom(posToGo, me.dropBomb(bombs)); ok {
 				debug("yes can escape from %v", posToGo)
 				dropBomb = true
 			} else {
@@ -783,7 +775,7 @@ func (r game) round() bool {
 		}
 	}
 
-	r.move(dropBomb, posToGo)
+	r.move(dropBomb, posToGo.Pos())
 
 	// 	// 이때 도망가는 중에도 폭탄을 떨어뜨릴지 고민해보자
 	// 	// 일단 도망
@@ -819,8 +811,8 @@ func (r game) round() bool {
 }
 
 // d0 시간뒤에 pos 에서 탈출할 수 있을까?
-func (p Player) canEscapeFrom(pos Pos, d0 int, bombs []Bomb) bool {
-	_, ok := bfs(pos, d0, bombs, func(x, y, d, x0, y0 int) bool {
+func (p Player) canEscapeFrom(pos Pos3, bombs []Bomb) ([]Pos3, bool) {
+	return bfs(pos, bombs, func(x, y, d, x0, y0 int) bool {
 		safe := true
 		for _, b := range bombs {
 			if b.inRange(Pos{x, y}) {
@@ -833,7 +825,6 @@ func (p Player) canEscapeFrom(pos Pos, d0 int, bombs []Bomb) bool {
 		}
 		return false
 	})
-	return ok
 }
 
 func (p Player) dropBomb(bombs []Bomb) []Bomb {
@@ -853,9 +844,9 @@ func (p Player) dropBomb(bombs []Bomb) []Bomb {
 
 // 놓을 수 있나? 놓아서 터질 박스는 있나? 죽지않고 피할 장소는?
 // 이미 놓여있는 bomb 들도 피해야 한다.
-func (p Player) canDropBomb(pos Pos, d0 int) (canDrop bool, safePlace Pos) {
+func (p Player) canDropBomb(pos Pos3) (canDrop bool, safePlace Pos3) {
 	b := Bomb{
-		Pos:       pos,
+		Pos:       pos.Pos(),
 		Owner:     p.ID,
 		Range:     p.Range,
 		CountDown: 8 + 1,
@@ -874,13 +865,13 @@ func (p Player) canDropBomb(pos Pos, d0 int) (canDrop bool, safePlace Pos) {
 		}
 	}
 	if len(destroyedBoxes) == 0 {
-		return false, Pos{}
+		return
 	}
-	if !p.canEscapeFrom(pos, d0, bombs2) {
-		return false, Pos{}
+	if _, ok := p.canEscapeFrom(pos, bombs2); !ok {
+		return
 	}
 
-	bfs(pos, d0, bombs2, func(x, y, d, x0, y0 int) bool {
+	bfs(pos, bombs2, func(x, y, d, x0, y0 int) bool {
 		// 거리가 8 이하고
 		// me.Pos 에서 터졌을때 range 에 들어가지 않아야 함.
 		visit := Pos{x, y}
@@ -892,7 +883,7 @@ func (p Player) canDropBomb(pos Pos, d0 int) (canDrop bool, safePlace Pos) {
 		}
 		if d <= b.CountDown {
 			canDrop = true
-			safePlace = visit
+			safePlace = visit.at(d)
 			return true
 		}
 		return false
