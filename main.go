@@ -56,6 +56,11 @@ type Pos3 struct {
 	Z int
 }
 
+// Pos ...
+func (p Pos3) Pos() Pos {
+	return Pos{p.X, p.Y}
+}
+
 func (p Pos) adjacent(o Pos) bool {
 	if p.X == o.X {
 		return abs(p.Y-o.Y) == 1
@@ -79,7 +84,7 @@ func (p Pos) safePathTo(dest Pos, bombs []Bomb) Pos {
 	p3 := Pos3{p.X, p.Y, 0}
 	// debug("bfs start")
 	bfs(p, 0, bombs, func(x, y, d, x0, y0 int) bool {
-		// debug("bfs: %d,%d,%d,%d,%d", x, y, d, x0, y0)
+		debug("bfs: %d,%d,%d,%d,%d", x, y, d, x0, y0)
 		if d == 0 {
 			return false
 		}
@@ -194,12 +199,26 @@ func (set SetPos) toSlice() []Pos {
 // 어차피 방문한 곳을 또 방문할 일이 없다.
 // 즉, 현 상태의 bombs를 보고
 // 안전한 경로로 bfs를 진행해보자.
-func bfs(pos Pos, d0 int, bombs []Bomb, visit func(x, y, d, x0, y0 int) bool) {
+func bfs(pos Pos, d0 int, bombs []Bomb, visit func(x, y, d, x0, y0 int) bool) ([]Pos, bool) {
+	var path []Pos
+	back := map[Pos3]Pos3{}
+	origin := Pos3{pos.X, pos.Y, d0}
+	getPath := func(next Pos3) []Pos {
+		path = append(path, next.Pos())
+		for origin != back[next] {
+			next = back[next]
+			path = append(path, next.Pos())
+		}
+		debug("%v", path)
+		return path
+	}
+
 	layer := []Pos{pos}
 	d := d0
 	if visit(pos.X, pos.Y, d, pos.X, pos.Y) {
-		return
+		return path, true
 	}
+
 	for len(layer) > 0 && d < d0+9 {
 		d++
 		var newLayer = SetPos{}
@@ -207,42 +226,49 @@ func bfs(pos Pos, d0 int, bombs []Bomb, visit func(x, y, d, x0, y0 int) bool) {
 			// 가만히 있는다
 			if canGo(p.X, p.Y, d, bombs) {
 				newLayer.add(p)
+				back[Pos3{p.X, p.Y, d}] = Pos3{p.X, p.Y, d - 1}
 				if visit(p.X, p.Y, d, p.X, p.Y) {
-					return
+					return getPath(Pos3{p.X, p.Y, d}), true
 				}
 			}
 
 			if canGo(p.X, p.Y-1, d, bombs) {
 				newLayer.add(Pos{p.X, p.Y - 1})
+				back[Pos3{p.X, p.Y - 1, d}] = Pos3{p.X, p.Y, d - 1}
 				if visit(p.X, p.Y-1, d, p.X, p.Y) {
-					return
+					return getPath(Pos3{p.X, p.Y - 1, d}), true
 				}
 			}
 
 			if canGo(p.X-1, p.Y, d, bombs) {
 				newLayer.add(Pos{p.X - 1, p.Y})
+				back[Pos3{p.X - 1, p.Y, d}] = Pos3{p.X, p.Y, d - 1}
 				if visit(p.X-1, p.Y, d, p.X, p.Y) {
-					return
+					return getPath(Pos3{p.X - 1, p.Y, d}), true
 				}
 			}
 
 			if canGo(p.X, p.Y+1, d, bombs) {
 				newLayer.add(Pos{p.X, p.Y + 1})
+				back[Pos3{p.X, p.Y + 1, d}] = Pos3{p.X, p.Y, d - 1}
 				if visit(p.X, p.Y+1, d, p.X, p.Y) {
-					return
+					return getPath(Pos3{p.X, p.Y + 1, d}), true
 				}
 			}
 
 			if canGo(p.X+1, p.Y, d, bombs) {
 				newLayer.add(Pos{p.X + 1, p.Y})
+				back[Pos3{p.X + 1, p.Y, d}] = Pos3{p.X, p.Y, d - 1}
 				if visit(p.X+1, p.Y, d, p.X, p.Y) {
-					return
+					return getPath(Pos3{p.X + 1, p.Y, d}), true
 				}
 			}
 
 		}
 		layer = newLayer.toSlice()
 	}
+
+	return path, false
 }
 
 // // World ...
@@ -694,10 +720,6 @@ func (r game) round() bool {
 			ok, _ := me.canDropBomb(pos, d)
 			if ok {
 				debug("found place to put a bomb, %v,%d", pos, d)
-				if !me.canEscapeFrom(pos, d, bombs) {
-					debug("but, can't escape from there")
-					return false
-				}
 				posToGo = pos
 				found = true
 				return true
@@ -791,8 +813,7 @@ func (r game) round() bool {
 
 // d0 시간뒤에 pos 에서 탈출할 수 있을까?
 func (p Player) canEscapeFrom(pos Pos, d0 int, bombs []Bomb) bool {
-	found := false
-	bfs(pos, d0, bombs, func(x, y, d, x0, y0 int) bool {
+	_, ok := bfs(pos, d0, bombs, func(x, y, d, x0, y0 int) bool {
 		safe := true
 		for _, b := range bombs {
 			if b.inRange(Pos{x, y}) {
@@ -801,12 +822,11 @@ func (p Player) canEscapeFrom(pos Pos, d0 int, bombs []Bomb) bool {
 			}
 		}
 		if safe {
-			found = true
 			return true
 		}
 		return false
 	})
-	return found
+	return ok
 }
 
 func (p Player) dropBomb(bombs []Bomb) []Bomb {
@@ -849,7 +869,7 @@ func (p Player) canDropBomb(pos Pos, d0 int) (canDrop bool, safePlace Pos) {
 	if len(destroyedBoxes) == 0 {
 		return false, Pos{}
 	}
-	if !p.canEscapeFrom(pos, d0, bombs) {
+	if !p.canEscapeFrom(pos, d0, bombs2) {
 		return false, Pos{}
 	}
 
