@@ -49,7 +49,7 @@ type Pos struct {
 	Y int
 }
 
-// Pos3
+// Pos3 ...
 type Pos3 struct {
 	X int
 	Y int
@@ -59,6 +59,10 @@ type Pos3 struct {
 // Pos ...
 func (p Pos3) Pos() Pos {
 	return Pos{p.X, p.Y}
+}
+
+func (p Pos) at(z int) Pos3 {
+	return Pos3{p.X, p.Y, z}
 }
 
 func (p Pos) adjacent(o Pos) bool {
@@ -84,7 +88,7 @@ func (p Pos) safePathTo(dest Pos, bombs []Bomb) Pos {
 	p3 := Pos3{p.X, p.Y, 0}
 	// debug("bfs start")
 	bfs(p, 0, bombs, func(x, y, d, x0, y0 int) bool {
-		debug("bfs: %d,%d,%d,%d,%d", x, y, d, x0, y0)
+		// debug("bfs: %d,%d,%d,%d,%d", x, y, d, x0, y0)
 		if d == 0 {
 			return false
 		}
@@ -151,14 +155,14 @@ type Item struct {
 	Type int
 }
 
-func canGo(x, y, d int, bombs []Bomb) bool {
-	p := Pos{x, y}
-	if x >= 0 && y >= 0 && x < width && y < height && board[y][x] == cellFloor {
+// TODO: 폭탄이 터지면서 board가 바뀌었을 수도 있다.
+func canGo(p Pos3, bombs []Bomb) bool {
+	if inRange2D(p.X, p.Y, width, height) && board[p.Y][p.X] == cellFloor {
 		for _, b := range bombs {
-			if b.Pos == p {
+			if b.Pos == p.Pos() {
 				return false
 			}
-			if b.CountDown-1 == d && b.inRange(p) {
+			if b.CountDown-1 == p.Z && b.inRange(p.Pos()) {
 				return false
 			}
 		}
@@ -187,6 +191,36 @@ func (set SetPos) toSlice() []Pos {
 	sort.Slice(slice, func(i, j int) bool {
 		if slice[i].X == slice[j].X {
 			return slice[i].Y < slice[j].Y
+		}
+		return slice[i].X < slice[j].X
+	})
+	return slice
+}
+
+// SetPos3 is set of Pos3
+type SetPos3 map[Pos3]struct{}
+
+func (set SetPos3) add(p Pos3) {
+	set[p] = struct{}{}
+}
+
+func (set SetPos3) has(p Pos3) bool {
+	_, ok := set[p]
+	return ok
+}
+
+func (set SetPos3) toSlice() []Pos3 {
+	slice := make([]Pos3, 0, len(set))
+	for k := range set {
+		slice = append(slice, k)
+	}
+	sort.Slice(slice, func(i, j int) bool {
+		if slice[i].X == slice[j].X {
+			if slice[i].Y == slice[j].Y {
+				return slice[i].Z < slice[j].Z
+			} else {
+				return slice[i].Y < slice[j].Y
+			}
 		} else {
 			return slice[i].X < slice[j].X
 		}
@@ -209,61 +243,34 @@ func bfs(pos Pos, d0 int, bombs []Bomb, visit func(x, y, d, x0, y0 int) bool) ([
 			next = back[next]
 			path = append(path, next.Pos())
 		}
-		debug("%v", path)
+		// debug("%v", path)
 		return path
 	}
 
-	layer := []Pos{pos}
-	d := d0
-	if visit(pos.X, pos.Y, d, pos.X, pos.Y) {
+	layer := []Pos3{pos.at(d0)}
+	if visit(pos.X, pos.Y, d0, pos.X, pos.Y) {
 		return path, true
 	}
 
-	for len(layer) > 0 && d < d0+9 {
-		d++
-		var newLayer = SetPos{}
+	dxs := []int{0, 0, 1, 0, -1}
+	dys := []int{0, 1, 0, -1, 0}
+
+	for i := 0; len(layer) > 0 && i < 9; i++ {
+		var newLayer = SetPos3{}
 		for _, p := range layer {
 			// 가만히 있는다
-			if canGo(p.X, p.Y, d, bombs) {
-				newLayer.add(p)
-				back[Pos3{p.X, p.Y, d}] = Pos3{p.X, p.Y, d - 1}
-				if visit(p.X, p.Y, d, p.X, p.Y) {
-					return getPath(Pos3{p.X, p.Y, d}), true
+			for k := 0; k < 5; k++ {
+				dx := dxs[k]
+				dy := dys[k]
+				next := Pos3{p.X + dx, p.Y + dy, p.Z + 1}
+				if canGo(next, bombs) && !newLayer.has(next) {
+					newLayer.add(next)
+					back[next] = p
+					if visit(next.X, next.Y, next.Z, p.X, p.Y) {
+						return getPath(next), true
+					}
 				}
 			}
-
-			if canGo(p.X, p.Y-1, d, bombs) {
-				newLayer.add(Pos{p.X, p.Y - 1})
-				back[Pos3{p.X, p.Y - 1, d}] = Pos3{p.X, p.Y, d - 1}
-				if visit(p.X, p.Y-1, d, p.X, p.Y) {
-					return getPath(Pos3{p.X, p.Y - 1, d}), true
-				}
-			}
-
-			if canGo(p.X-1, p.Y, d, bombs) {
-				newLayer.add(Pos{p.X - 1, p.Y})
-				back[Pos3{p.X - 1, p.Y, d}] = Pos3{p.X, p.Y, d - 1}
-				if visit(p.X-1, p.Y, d, p.X, p.Y) {
-					return getPath(Pos3{p.X - 1, p.Y, d}), true
-				}
-			}
-
-			if canGo(p.X, p.Y+1, d, bombs) {
-				newLayer.add(Pos{p.X, p.Y + 1})
-				back[Pos3{p.X, p.Y + 1, d}] = Pos3{p.X, p.Y, d - 1}
-				if visit(p.X, p.Y+1, d, p.X, p.Y) {
-					return getPath(Pos3{p.X, p.Y + 1, d}), true
-				}
-			}
-
-			if canGo(p.X+1, p.Y, d, bombs) {
-				newLayer.add(Pos{p.X + 1, p.Y})
-				back[Pos3{p.X + 1, p.Y, d}] = Pos3{p.X, p.Y, d - 1}
-				if visit(p.X+1, p.Y, d, p.X, p.Y) {
-					return getPath(Pos3{p.X + 1, p.Y, d}), true
-				}
-			}
-
 		}
 		layer = newLayer.toSlice()
 	}
