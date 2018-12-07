@@ -697,11 +697,12 @@ func (r game) round() bool {
 			if e.Pos == pos.Pos() {
 				debug("found an item %d,%d,%d", x, y, d)
 				// 하지만 먹고나서 괜찮을까?
-				if _, ok := me.canEscapeFrom(pos, bombs); !ok {
+				safe, ok := me.canEscapeFrom(pos, bombs)
+				if !ok {
 					debug("but, can't escape from there")
 					return false
 				}
-
+				debug("safepath from %v=  %v", pos, safe)
 				posToGo = pos
 				found = true
 				return true
@@ -888,16 +889,44 @@ func surviveIfAllBombs(p Pos3, dropBomb bool, bombs []Bomb) bool {
 }
 
 // d0 시간뒤에 pos 에서 탈출할 수 있을까?
+// 탈출 가능한 곳을 두어개 찾을 수 있어야 한다.
+// 반환값은 가능한 목록??
+// 그리고 거기가 다른 플레이어에게 더 가까우면 안된다.
 func (p Player) canEscapeFrom(pos Pos3, bombs []Bomb) ([]Pos3, bool) {
-	return bfs(pos, bombs, items, func(x, y, d, x0, y0 int, bombs []Bomb, items []Item) bool {
+	return bfs(pos, bombs, items, func(x, y, d, x0, y0 int, bs []Bomb, is []Item) bool {
+		// here := Pos3{x, y, d}
 		safe := true
-		for _, b := range bombs {
+		for _, b := range bs {
 			if b.inRange(Pos{x, y}) {
 				safe = false
 				break
 			}
 		}
+
 		if safe {
+			// debug("seems safe %v", here)
+			// for _, o := range players {
+			// 	if o.ID == p.ID {
+			// 		continue
+			// 	}
+			// 	// o가 먼저 여기에 도착하면 안된다.
+			// 	closer := false
+			// 	bfs(o.Pos.at(pos.Z), bombs, items, func(x, y, d, x0, y0 int, bs []Bomb, is []Item) bool {
+			// 		if d >= here.Z {
+			// 			return true
+			// 		}
+			// 		if x == here.X && y == here.Y {
+			// 			closer = true
+			// 			return true
+			// 		}
+			// 		return false
+			// 	})
+			// 	if closer {
+			// 		// debug("but %d may block me", o.ID)
+			// 		return false
+			// 	}
+			// }
+			// debug("safe!")
 			return true
 		}
 		return false
