@@ -700,7 +700,7 @@ func (r game) round() bool {
 		debug("I have a bomb, box here?")
 		ok, safe := me.canDropBomb(origin, bombs)
 		if ok {
-			debug("Yes")
+			debug("yes, i can escape to %v", safe)
 			dropBomb = true
 			posToGo = safe
 			found = true
@@ -776,23 +776,41 @@ func (r game) round() bool {
 		}
 	}
 
+	// 이제 갈 곳을 결정했다. -> 현재는  목표가 1, 나중에 N개를 평가해보자..
+
+	// 다른 플레이어들로 인해 위험에 처한다면
+	// 이 목적지를 버려야 한다.
+
+	// 지금의 선택(폭탄/이동)으로 인해
+	// 나의 탈출구가 하나뿐이 되는 상황이라면.
+	// 그리고 상대가 그 탈출구를 폭탄으로 막을 수 있다면?
+
+	// 1. 당장 다른 플레이어들이 폭탄을 둔다면?
+	// 2.
 	// 마지막으로 지금 상대방들이 폭탄을 뒀는데도
 	// 목적지로 가서 살수 있을까?
 	// 살수 없다면 거기로 가지말자.
-	for _, p := range players {
-		if p.ID == myID {
-			continue
-		}
-		bombs = p.dropBomb(bombs)
-	}
-	if _, ok := me.canEscapeFrom(posToGo, bombs); !ok {
+
+	if !surviveIfAllBombs(posToGo, dropBomb, bombs) {
 		debug("if others put bombs, I may die from %v", posToGo)
-		path, ok := me.canEscapeFrom(origin, bombs)
-		if !ok {
-			debug("i will die!")
-		} else {
-			debug("wow, i can escape!")
+		if dropBomb && surviveIfAllBombs(posToGo, false, bombs) {
+			debug("if i don't drop bomb, it's okay")
+			dropBomb = false
+		} else if dropBomb && surviveIfAllBombs(origin, dropBomb, bombs) {
+			debug("if can survive from origin with bomb")
+			path, _ := me.canEscapeFrom(origin, allBombs(dropBomb, bombs))
 			posToGo = path[0]
+		} else if dropBomb && surviveIfAllBombs(origin, false, bombs) {
+			debug("if can survive from origin without bomb")
+			path, _ := me.canEscapeFrom(origin, allBombs(false, bombs))
+			posToGo = path[0]
+			dropBomb = false
+		} else if surviveIfAllBombs(origin, false, bombs) {
+			debug("if can survive from origin")
+			path, _ := me.canEscapeFrom(origin, allBombs(false, bombs))
+			posToGo = path[0]
+		} else {
+			debug("doomed!")
 		}
 	}
 
@@ -829,6 +847,26 @@ func (r game) round() bool {
 	// range 바
 
 	return true
+}
+
+func allBombs(dropBomb bool, bombs []Bomb) []Bomb {
+	for _, p := range players {
+		if p.ID == myID {
+			if dropBomb {
+				bombs = p.dropBomb(bombs)
+			}
+			continue
+		}
+		if p.Bombs > 0 {
+			bombs = p.dropBomb(bombs)
+		}
+	}
+	return bombs
+}
+
+func surviveIfAllBombs(p Pos3, dropBomb bool, bombs []Bomb) bool {
+	_, ok := me.canEscapeFrom(p, allBombs(dropBomb, bombs))
+	return ok
 }
 
 // d0 시간뒤에 pos 에서 탈출할 수 있을까?
