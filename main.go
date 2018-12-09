@@ -746,6 +746,14 @@ func (r game) round() bool {
 
 	if !found {
 		debug("stay here? is it safe? let's find a safe place")
+
+		// 8턴을 살아남을 곳 찾아보자.
+		// 닥터 스트레인지처럼
+		// 각 경우를 따져보아야..
+		// 난 어디로 갈까?
+		// 상대는 어디로 갈까?
+		bt(myID, world{0, board, players, bombs, items})
+
 		var bombsInDanger []Bomb
 		for _, b := range bombs {
 			if b.inRange(me.Pos) {
@@ -866,6 +874,42 @@ func (r game) round() bool {
 	// range 바
 
 	return true
+}
+
+type world struct {
+	t       int
+	board   [][]int
+	players []Player
+	bombs   []Bomb
+	items   []Item
+}
+
+func (w world) String() string {
+	return ""
+}
+
+type move struct {
+}
+
+func (w world) next() []world {
+	return nil
+}
+
+func (w world) winner() int {
+	return -1
+}
+
+func bt(id int, w world) {
+	switch winner := w.winner(); winner {
+	case -1:
+		break
+	default:
+		return
+	}
+	// 각 player 의 next move 를 따라가보자.
+	for _, w := range w.next() {
+		bt(id, w)
+	}
 }
 
 func allBombs(dropBomb bool, bombs []Bomb) []Bomb {
